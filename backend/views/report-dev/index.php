@@ -5,9 +5,9 @@ use yii\grid\GridView;
 use common\widgets\Card;
 
 /* @var $this yii\web\View */
-/* @var $sqlProvider yii\data\ActiveDataProvider */
+/* @var $dataProvider yii\data\ActiveDataProvider */
+/* @var $searchModel backend\models\ReportDev */
 /* @var $searchProvider yii\data\ActiveDataProvider */
-/* @var $columns array */
 
 $this->title = 'SQL Data Provider Demo';
 $this->params['breadcrumbs'][] = $this->title;
@@ -17,13 +17,12 @@ $this->title = Yii::$app->urlManager->getLastTitle();
 
 <?php Card::begin([]); ?>
 
-
-<?php echo $this->render('_search', ['model' => $searchProvider]);  ?>
+<?php echo $this->render('_search', ['model' => $searchModel]);  ?>
 
 <?= GridView::widget([
-        'dataProvider'  => $sqlProvider,
-        'filterModel'   => $searchProvider,
-        'columns'       => $columns,
+        'dataProvider'  => $dataProvider,
+        'filterModel'   => $dataProvider,
+        'columns'       => $searchModel::getColumns(),
         'showFooter'    => TRUE
         ]);
 ?>

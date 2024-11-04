@@ -1,63 +1,54 @@
 <?php
 
 namespace backend\models;
-use common\Cache;
+
 use common\models\BaseActiveRecord;
 use common\models\Product;
 use common\validators\DbDateValidator;
 use common\validators\RequiredIntegerValidator;
-use Couchbase\SearchSort;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
+use Yii;
 use yii\base\Model;
-use yii\data\SqlDataProvider;
 
 /**
  * Report Dev model
  *
- * @property integer $id
- * @property string $name
- */
-class RepordDev extends Model
+ * ReportDev model
+ * @property string $client
+ * @property string $date
+ * @property int $product1
+ * @property int $product2
+ * @property int $product3
+ * @property int $product4
+ * @property int $product5
+ * @property int $product6
+ * @property int $product7
+ * @property int $product8
+ * @property int $product9
+ * @property int $product10
+ * @property int $product11
+ * @property int $product12
+ * @property int $product13
+*/
+class ReportDev extends BaseActiveRecord
 {
+
     public $period;
-    public $region_id;
     public $periodStart;
     public $periodEnd;
+    public $region_id;
 
-    public $sqlProvider;
+    public static $attributeLabels = [
+        "client" => "Клиент",
+    ];
 
+    static $columns;
 
-    public function init()
+    /**
+     * {@inheritdoc}
+     */
+    public static function tableName()
     {
-        $totalCount = Yii::$app->db->createCommand('SELECT COUNT(*) FROM orders GROUP BY client ')
-            ->queryScalar();
-
-        $products = Product::find()->all();
-        $sql = 'SELECT o.client';
-        $columns = ['client'];
-        $columns2 = [];
-        /** @var  $product  Product */
-        foreach ($products as $product) {
-            $sql .= ",SUM(CASE WHEN op.product_id = ".$product->id." THEN op.q END) '".$product->name."'";
-            $columns[] = $product->name;
-        }
-        $sql .= ' FROM orders o LEFT JOIN orders_products op ON op.order_id = o.id LEFT JOIN products p ON p.id = op.product_id GROUP BY o.client';
-
-        $this->sqlProvider = new SqlDataProvider([
-            'sql' => $sql,
-            'sort' => [
-                'attributes' => $columns
-            ],
-            'totalCount' => $totalCount
-        ]);
-
-    }
-
-    public function formName()
-    {
-        return "ReportDev";
+        return 'report_dev';
     }
 
     /**
@@ -66,9 +57,8 @@ class RepordDev extends Model
     public function rules()
     {
         return [
-            [['client','text', 'period'], 'string', 'max' => 250],
-            [['region_id'], 'integer'],
-
+            [['client', 'phone'], 'string', 'max' => 250],
+            [['region_id', 'number', 'sum'], 'integer'],
         ];
     }
 
@@ -77,25 +67,63 @@ class RepordDev extends Model
      */
     public function attributeLabels()
     {
-        return [
-            'id'            => 'ID',
-            'period'        => 'Период',
-            'order-period'  => 'Период ордеров',
-            'client'        => 'ФИО клиента',
-            'region_id'     => 'Район',
-            'text'          => 'Текст'
-        ];
+        return self::$attributeLabels;
     }
 
+    /**
+     * @return void
+     * @throws \yii\db\Exception
+     */
+    public static function createView()
+    {
+        $products = Product::find()->all();
+        $alias = [];
+        $ptr = 0;
+        foreach ($products as $product) {
+            $alias[$product->name] = 'product' . $ptr++;
+        }
 
+        $sql = 'CREATE OR REPLACE 
+            ALGORITHM = MERGE 
+            DEFINER = CURRENT_USER 
+            SQL SECURITY INVOKER
+        VIEW report_dev
+        AS
+            SELECT o.client';
+
+        self::$columns = [[ 'attribute' => 'client', 'filter' => false, 'footer' => 'ИТОГО' ]];
+
+        /** @var  $product  Product */
+        foreach ($products as $product) {
+            $productname = $alias[$product->name];
+            $sql .= ",SUM(CASE WHEN op.product_id = ".$product->id." THEN op.q END) '".$productname."'";
+            self::$attributeLabels[$productname] = $product->name;
+            self::$columns[] = [
+                'attribute' => $productname,
+                'filter' => false,
+                'value' => function($model, $key, $index, $obj) use ($productname) {
+                    $obj->footer += $model[$productname];
+                    return $model[$productname];
+                }
+            ];
+        }
+        $sql .= ', FALSE as is_deleted, 1 as id, o.date as date, o.region_id as region_id';
+        $sql .= ' FROM orders o LEFT JOIN orders_products op ON op.order_id = o.id 
+            LEFT JOIN products p ON p.id = op.product_id GROUP BY o.region_id, o.client';
+
+        Yii::$app->db->createCommand($sql)->execute();
+
+    }
+
+    /**
+     * @inheritDoc
+     */
     public function search($params, $recsOnPage = 20)
     {
         $this->region_id = (int)trim($params['region'] ?? 0);
-        $this->text = trim($params['text'] ?? '');
         $this->period = trim($params['period'] ?? '');
 
-        $dataProvider = $this->sqlProvider;
-
+        $dataProvider = parent::search($params, $recsOnPage);
         if ($dataProvider) {
             $p = [];
             if (preg_match('/([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{4})[^0-9]+([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{4})/', $this->period, $p)) {
@@ -104,6 +132,7 @@ class RepordDev extends Model
             }
 
             $query = $dataProvider->query;
+            
             if ($this->periodStart) {
                 $query->andWhere(['>=', 'date', $this->periodStart]);
             }
@@ -113,47 +142,12 @@ class RepordDev extends Model
             if ($this->region_id) {
                 $query->andWhere(['region_id' => $this->region_id]);
             }
-
-            if ($this->text) {
-                $query->andWhere(['OR',
-                    ['like', 'client', $this->text],
-                ]);
-            }
         }
-
-
         return $dataProvider;
     }
 
-    public function _getHeaderStyle() {
-        return array(
-            'alignment' => array(
-                'horizontal' => Alignment::HORIZONTAL_CENTER,
-                'vertical'   => Alignment::VERTICAL_CENTER,
-                'wrap' => TRUE,
-            ),
-            'font' => array('bold' => true),
-            'fill' => array(
-                'fillType'       => Fill::FILL_SOLID,
-                'startColor' => array(
-                    'argb' => 'FFF4CCCC',
-                )
-            )
-        );
+    public static function getColumns()
+    {
+        return self::$columns;
     }
-
-    public function _getRowStyle() {
-        return array(
-            'alignment' => array(
-                'horizontal' => Alignment::HORIZONTAL_CENTER,
-                'vertical'   => Alignment::VERTICAL_CENTER,
-                'wrap' => TRUE,
-            ),
-            'numberFormat' => array('code' => NumberFormat::FORMAT_NUMBER)
-        );
-    }
-
-
-
-
 }
